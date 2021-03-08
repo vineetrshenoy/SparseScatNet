@@ -555,7 +555,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logfile, write
 
         # Record useful indicators for ISTC
         if args.arch in ['sparsescatnet', 'sparsescatnetw']:
-            lambda_0_max = lambda_0_max_batch.max().item()
+            lambda_0_max = lambda_0_max_batch.mean().item()
             rec_losses_rel.update(rec_loss_rel.mean().item(), input.size(0))
             if len(sparsity) > args.n_iterations:  # multi-GPU
                 sparsities.update(sparsity.reshape(-1, args.n_iterations).mean(dim=0).cpu().numpy(), input.size(0))
@@ -913,14 +913,9 @@ def compute_lambda_0(loader, model, nb_batches=1):
             if i >= nb_batches:
                 break
             input = input.cuda()
-            input_proj = model(input, return_proj=True)
-            WT_x_proj = nn.functional.conv2d(
-                input_proj, model.module.istc.w_weight.data.transpose(0, 1).contiguous())
-            abs_WT_x_proj = torch.abs(WT_x_proj)
-
-            lambda_max = abs_WT_x_proj.max()
-            if lambda_max > best_lambda[0]:
-                best_lambda[0] = lambda_max
+            lambda_max = model(input)[1]
+            if lambda_max.mean() > best_lambda[0]:
+                best_lambda[0] = lambda_max.mean()
 
         return best_lambda
 

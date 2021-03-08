@@ -15,8 +15,7 @@ You can install the PyTorch and skcuda packages by:
 
 `pip install torch torchvision tensorboard scikit-cuda cupy`
 
-For the multi-GPU version of Kymatio, until the release of Kymatio v0.2 (planned next spring) which shall support 
-this feature, you can use the _multigpu_ branch of the Kymatio fork https://github.com/j-zarka/kymatio.
+For the multi-GPU version of Kymatio, you can use the _multigpu_ branch of the Kymatio fork https://github.com/j-zarka/kymatio.
 
 To install this branch:
 
@@ -26,9 +25,6 @@ cd kymatio
 pip install -r requirements.txt
 pip install .
 ```
-
-Multi-GPU scattering transform computation may occasionally lead to a [segmentation fault due to torch.fft](https://github.com/pytorch/pytorch/issues/24176),
-especially when numerous GPUs are used. If this is the case, just relaunch the script as those issues shall seldom occur.
 
 ### Phase scattering
 The phase scattering described in section 2. of the paper is implemented 
