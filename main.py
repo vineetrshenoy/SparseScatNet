@@ -29,6 +29,7 @@ from models.SparseScatNet import SparseScatNet
 
 from torch.utils.tensorboard import SummaryWriter
 from utils import print_and_write, compute_stding_matrix
+from launch import launch
 
 model_names = ['sparsescatnet', 'sparsescatnetw', 'scatnet']
 
@@ -115,10 +116,27 @@ parser.add_argument('--classifier-type', default='mlp', type=str, help='classifi
 parser.add_argument('--nb-hidden-units', default=2048, type=int, help='number of hidden units for mlp classifier')
 parser.add_argument('--dropout-p-mlp', default=0.3, type=float, help='dropout probability in mlp')
 parser.add_argument('--nb-l-mlp', default=2, type=int, help='number of hidden layers in mlp')
+parser.add_argument(
+        "--num-gpus", type=int, default=2, help="number of gpus *per machine*"
+    )
+parser.add_argument("--num-machines", type=int, default=1)
+parser.add_argument(
+    "--machine-rank",
+    type=int,
+    default=0,
+    help="the rank of this machine (unique per machine)",
+)
 
+# PyTorch still may leave orphan processes in multi-gpu training.
+# Therefore we use a deterministic way to obtain port,
+# so that users are aware of orphan processes by seeing the port occupied.
+port = 2 ** 15 + 2 ** 14 + hash(os.getuid()) % 2 ** 14
+parser.add_argument(
+    "--dist-url", default="tcp://127.0.0.1:{}".format(port)
+)
 
-def main():
-    args = parser.parse_args()
+def main(args):
+    
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -900,7 +918,7 @@ def accuracy(output, target, topk=(1,)):
 
         res = []
         for k in topk:
-            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
 
@@ -921,4 +939,14 @@ def compute_lambda_0(loader, model, nb_batches=1):
 
 
 if __name__ == '__main__':
-    main()
+
+    args = parser.parse_args()
+    launch(
+        main,
+        args.num_gpus,
+        num_machines=args.num_machines,
+        machine_rank=args.machine_rank,
+        dist_url=args.dist_url,
+        args=(args,),
+    )
+    #main()
