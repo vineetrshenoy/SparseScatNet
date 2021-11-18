@@ -18,6 +18,7 @@ import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
+from torch.utils.data.distributed import DistributedSampler
 
 from kymatio import Scattering2D
 from phase_scattering2d_torch import ScatteringTorch2D_wph
@@ -178,7 +179,7 @@ def main_worker(args):
 
     writer = SummaryWriter(logs_dir)
 
-    # Data loading code
+    # Data loading code: TODO: Change lines 184-237 for MiniImageNet
     ###########################################################################################
     traindir = os.path.join(args.data, 'train')
     valdir = os.path.join(args.data, 'val')
@@ -199,6 +200,8 @@ def main_worker(args):
         normalize,
     ]))
 
+    train_sampler = DistributedSampler(train_dataset)
+    val_sampler = DistributedSampler(val_dataset)
     # can use a subset of all classes (specified in a file or randomly chosen)
     if args.nb_classes < 1000:
         train_indices = list(np.load('utils_sampling/imagenet_train_class_indices.npy'))
@@ -226,8 +229,8 @@ def main_worker(args):
         train_dataset = torch.utils.data.Subset(train_dataset, train_indices_full)
         val_dataset = torch.utils.data.Subset(val_dataset, val_indices_full)
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
-                                               num_workers=args.workers, pin_memory=True)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, 
+                                               num_workers=args.workers, pin_memory=True, sampler=train_sampler)
 
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
                                              num_workers=args.workers, pin_memory=True)
@@ -237,7 +240,7 @@ def main_worker(args):
     ###########################################################################################
     if args.arch in model_names:
 
-        n_space = 224
+        n_space = 224 #TODO: Determine if this needs to change for episodic training
         nb_channels_in = 3
 
         # create scattering
@@ -249,7 +252,7 @@ def main_worker(args):
         if args.scattering_wph:
             A = args.scattering_nphases
             scattering = ScatteringTorch2D_wph(J=J, shape=(224, 224), L=L_ang, A=A, max_order=max_order,
-                                               backend=args.backend)
+                                               backend=args.backend) #TODO: Check if change needed for episodic
         else:
             scattering = Scattering2D(J=J, shape=(224, 224), L=L_ang, max_order=max_order,
                                       backend=args.backend)
@@ -332,7 +335,7 @@ def main_worker(args):
             arch_log = "=> creating model ScatNet with phase scattering {} and classifier {}".\
                 format(args.scattering_wph, args.classifier_type)
 
-        # Create classifier
+        # Create classifier TODO: Classifier needs to change for episodic training
         ###########################################################################################
 
         classifier = Classifier(n_space, nb_channels_in, classifier_type=args.classifier_type,
@@ -356,7 +359,7 @@ def main_worker(args):
                                                                                 logfile, summaryfile)
 
     # DataParallel will divide and allocate batch_size to all available GPUs
-    model = torch.nn.DataParallel(model).cuda()
+    model = torch.nn.parallel.DistributedDataParallel(model) #TODO: Change back to DataParallel for faster implementation
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
@@ -450,10 +453,10 @@ def main_worker(args):
         adjust_learning_rate(optimizer, epoch, args)
 
         # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, args, logfile, writer)
+        train(train_loader, model, criterion, optimizer, epoch, args, logfile, writer) #TODO: Change Training function
 
         # evaluate on validation set
-        acc1, acc5 = validate(val_loader, model, criterion, epoch, args, logfile, summaryfile, writer)
+        acc1, acc5 = validate(val_loader, model, criterion, epoch, args, logfile, summaryfile, writer) #TODO: Validation will be different episodic
 
         # remember best acc@1 and save checkpoint
         is_best = acc1 > best_acc1
@@ -522,7 +525,7 @@ def main_worker(args):
     print_and_write(
         "Best top 1 accuracy {:.2f} at epoch {}, best top 5 accuracy {:.2f} at epoch {}".format(best_acc1,
                                                                                                 best_epoch_acc1,
-                                                                                                best_acc5,
+                                                                                                  best_acc5,
                                                                                                 best_epoch_acc5),
         logfile, summaryfile)
 
@@ -553,7 +556,8 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logfile, write
     for i, (input, target) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
-
+        
+        #TODO: Need to change for episodic
         input = input.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
 
@@ -570,7 +574,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logfile, write
         losses.update(loss.item(), input.size(0))
         top1.update(acc1[0], input.size(0))
         top5.update(acc5[0], input.size(0))
-
+        #TODO: Can maybe use the validate function to do the meta-test stage
         # Record useful indicators for ISTC
         if args.arch in ['sparsescatnet', 'sparsescatnetw']:
             lambda_0_max = lambda_0_max_batch.mean().item()
@@ -587,6 +591,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logfile, write
 
 
         # compute gradient and do SGD step
+        #TODO: Needs to run only after all tasks have been trained
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
