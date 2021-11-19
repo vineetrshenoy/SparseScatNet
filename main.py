@@ -19,6 +19,8 @@ import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from torch.utils.data.distributed import DistributedSampler
+from torchmeta.datasets.helpers import miniimagenet
+from torchmeta.utils.data import BatchMetaDataLoader
 
 from kymatio import Scattering2D
 from phase_scattering2d_torch import ScatteringTorch2D_wph
@@ -181,6 +183,7 @@ def main_worker(args):
 
     # Data loading code: TODO: Change lines 184-237 for MiniImageNet
     ###########################################################################################
+    '''
     traindir = os.path.join(args.data, 'train')
     valdir = os.path.join(args.data, 'val')
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -234,6 +237,13 @@ def main_worker(args):
 
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
                                              num_workers=args.workers, pin_memory=True)
+    '''
+
+    train_dataset = miniimagenet("data", ways=5, shots=5, test_shots=15, meta_train=True, download=True)
+    val_dataset = miniimagenet("data", ways=5, shots=5, test_shots=15, meta_val=True, download=True)
+    
+    train_loader = BatchMetaDataLoader(train_dataset, batch_size=16, num_workers=4)
+    val_loader = BatchMetaDataLoader(val_dataset, batch_size=16, num_workers=4)
     ###########################################################################################
 
     # Model creation
@@ -339,7 +349,7 @@ def main_worker(args):
         ###########################################################################################
 
         classifier = Classifier(n_space, nb_channels_in, classifier_type=args.classifier_type,
-                                nb_classes=1000, nb_hidden_units=args.nb_hidden_units, nb_l_mlp=args.nb_l_mlp,
+                                nb_classes=100, nb_hidden_units=args.nb_hidden_units, nb_l_mlp=args.nb_l_mlp,
                                 dropout_p_mlp=args.dropout_p_mlp, avg_ker_size=args.avg_ker_size)
 
         # Create model
@@ -359,8 +369,8 @@ def main_worker(args):
                                                                                 logfile, summaryfile)
 
     # DataParallel will divide and allocate batch_size to all available GPUs
-    model = torch.nn.parallel.DistributedDataParallel(model) #TODO: Change back to DataParallel for faster implementation
-
+    #model = torch.nn.parallel.DistributedDataParallel(model) #TODO: Change back to DataParallel for faster implementation
+    model = torch.nn.DataParallel(model).cuda()
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
@@ -944,7 +954,7 @@ def compute_lambda_0(loader, model, nb_batches=1):
 
 
 if __name__ == '__main__':
-
+    '''
     args = parser.parse_args()
     launch(
         main,
@@ -955,3 +965,7 @@ if __name__ == '__main__':
         args=(args,),
     )
     #main()
+
+    '''
+    c = 6
+
