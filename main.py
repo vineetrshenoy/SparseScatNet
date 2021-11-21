@@ -21,6 +21,7 @@ import torchvision.datasets as datasets
 from torch.utils.data.distributed import DistributedSampler
 from torchmeta.datasets.helpers import miniimagenet
 from torchmeta.utils.data import BatchMetaDataLoader
+from torchvision.transforms import Compose, Resize, ToTensor
 
 from kymatio import Scattering2D
 from phase_scattering2d_torch import ScatteringTorch2D_wph
@@ -183,7 +184,6 @@ def main_worker(args):
 
     # Data loading code: TODO: Change lines 184-237 for MiniImageNet
     ###########################################################################################
-    '''
     traindir = os.path.join(args.data, 'train')
     valdir = os.path.join(args.data, 'val')
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -203,8 +203,8 @@ def main_worker(args):
         normalize,
     ]))
 
-    train_sampler = DistributedSampler(train_dataset)
-    val_sampler = DistributedSampler(val_dataset)
+    #train_sampler = DistributedSampler(train_dataset)
+    #val_sampler = DistributedSampler(val_dataset)
     # can use a subset of all classes (specified in a file or randomly chosen)
     if args.nb_classes < 1000:
         train_indices = list(np.load('utils_sampling/imagenet_train_class_indices.npy'))
@@ -233,17 +233,18 @@ def main_worker(args):
         val_dataset = torch.utils.data.Subset(val_dataset, val_indices_full)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, 
-                                               num_workers=args.workers, pin_memory=True, sampler=train_sampler)
+                                               num_workers=args.workers, pin_memory=True)
 
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
                                              num_workers=args.workers, pin_memory=True)
-    '''
-
-    train_dataset = miniimagenet("data", ways=5, shots=5, test_shots=15, meta_train=True, download=True)
-    val_dataset = miniimagenet("data", ways=5, shots=5, test_shots=15, meta_val=True, download=True)
+    
+    
+    train_dataset = miniimagenet("data", ways=5, shots=5, test_shots=15, transform=Compose([Resize(224), ToTensor()]), meta_train=True, download=True)
+    val_dataset = miniimagenet("data", ways=5, shots=5, test_shots=15, transform=Compose([Resize(224), ToTensor()]), meta_val=True, download=True)
     
     train_loader = BatchMetaDataLoader(train_dataset, batch_size=16, num_workers=4)
     val_loader = BatchMetaDataLoader(val_dataset, batch_size=16, num_workers=4)
+    
     ###########################################################################################
 
     # Model creation
@@ -563,21 +564,30 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logfile, write
     model.train()
 
     end = time.time()
-    for i, (input, target) in enumerate(train_loader):
+    for i, batch in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
         
         #TODO: Need to change for episodic
-        input = input.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
+        #input = input.cuda(non_blocking=True)
+        #target = target.cuda(non_blocking=True)
 
-        # compute output
-        if args.arch in ['sparsescatnet', 'sparsescatnetw']:
-            output, lambda_0_max_batch, sparsity, support_size, support_diff, rec_loss_rel = model(input)
-        else:
-            output = model(input)
+        train_inputs, train_labels = batch['train']
+        batch_size = train_inputs.shape[0]
 
-        loss = criterion(output, target)
+        optimizer.zero_grad()
+        for i in range(0, batch_size):
+            input = train_inputs[i, ::]
+            labels = train_labels[i, ::].cuda()
+            # compute output
+            if args.arch in ['sparsescatnet', 'sparsescatnetw']:
+                output, lambda_0_max_batch, sparsity, support_size, support_diff, rec_loss_rel = model(input)
+            else:
+                output = model(input)
+
+            #loss_temp = criterion(output, labels)
+            loss = criterion(output, labels)
+            loss.backward()
 
         # measure accuracy and record loss
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
@@ -942,7 +952,9 @@ def compute_lambda_0(loader, model, nb_batches=1):
     with torch.no_grad():
         best_lambda = torch.zeros(1).cuda()
 
-        for i, (input, target) in enumerate(loader):
+        for i, batch in enumerate(loader):
+            input, target = batch['train']
+            input = input[0, :]
             if i >= nb_batches:
                 break
             input = input.cuda()
@@ -954,8 +966,9 @@ def compute_lambda_0(loader, model, nb_batches=1):
 
 
 if __name__ == '__main__':
-    '''
     args = parser.parse_args()
+    '''
+    
     launch(
         main,
         args.num_gpus,
@@ -964,8 +977,9 @@ if __name__ == '__main__':
         dist_url=args.dist_url,
         args=(args,),
     )
-    #main()
+    #
 
     '''
+    main(args)
     c = 6
 
