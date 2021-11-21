@@ -589,12 +589,17 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logfile, write
             loss = criterion(output, labels)
             loss.backward()
 
+        
+        optimizer.step()
+        
         # measure accuracy and record loss
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
         losses.update(loss.item(), input.size(0))
         top1.update(acc1[0], input.size(0))
         top5.update(acc5[0], input.size(0))
-        #TODO: Can maybe use the validate function to do the meta-test stage
+        
+        
+        
         # Record useful indicators for ISTC
         if args.arch in ['sparsescatnet', 'sparsescatnetw']:
             lambda_0_max = lambda_0_max_batch.mean().item()
@@ -610,12 +615,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logfile, write
                 support_diffs.update(support_diff.cpu().numpy(), input.size(0))
 
 
-        # compute gradient and do SGD step
-        #TODO: Needs to run only after all tasks have been trained
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
+        
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
