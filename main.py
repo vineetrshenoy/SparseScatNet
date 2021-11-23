@@ -242,8 +242,8 @@ def main_worker(args):
     train_dataset = miniimagenet("data", ways=5, shots=5, test_shots=15, transform=Compose([Resize(224), ToTensor()]), meta_train=True, download=True)
     val_dataset = miniimagenet("data", ways=5, shots=5, test_shots=15, transform=Compose([Resize(224), ToTensor()]), meta_val=True, download=True)
     
-    train_loader = BatchMetaDataLoader(train_dataset, batch_size=16, num_workers=4)
-    val_loader = BatchMetaDataLoader(val_dataset, batch_size=16, num_workers=4)
+    train_loader = BatchMetaDataLoader(train_dataset, batch_size=args.batch_size, num_workers=4)
+    val_loader = BatchMetaDataLoader(val_dataset, batch_size=args.batch_size, num_workers=4)
     
     ###########################################################################################
 
@@ -573,12 +573,14 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logfile, write
         #target = target.cuda(non_blocking=True)
 
         train_inputs, train_labels = batch['train']
+        
         batch_size = train_inputs.shape[0]
 
         optimizer.zero_grad()
-        for i in range(0, batch_size):
-            input = train_inputs[i, ::]
-            labels = train_labels[i, ::].cuda()
+        loss_sum = 0
+        for j in range(0, batch_size):
+            input = train_inputs[j, ::]
+            labels = train_labels[j, ::].cuda()
             # compute output
             if args.arch in ['sparsescatnet', 'sparsescatnetw']:
                 output, lambda_0_max_batch, sparsity, support_size, support_diff, rec_loss_rel = model(input)
@@ -588,15 +590,19 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logfile, write
             #loss_temp = criterion(output, labels)
             loss = criterion(output, labels)
             loss.backward()
+            loss_sum += loss.item()
 
         
         optimizer.step()
+        optimizer.zero_grad()
         
+        test_inputs, test_labels = batch['test']
+                
         # measure accuracy and record loss
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
-        losses.update(loss.item(), input.size(0))
-        top1.update(acc1[0], input.size(0))
-        top5.update(acc5[0], input.size(0))
+        acc1, acc5 = accuracy(test_inputs, test_labels, model, args, topk=(1, 5))
+        losses.update(loss.item(), batch_size)
+        top1.update(acc1, batch_size)
+        top5.update(acc5, batch_size)
         
         
         
@@ -703,26 +709,36 @@ def validate(val_loader, model, criterion, epoch, args, logfile, summaryfile, wr
 
     with torch.no_grad():
         end = time.time()
-        for i, (input, target) in enumerate(val_loader):
+        
+        
+        for i, batch in enumerate(val_loader):
             # measure data loading time
             data_time.update(time.time() - end)
 
-            input = input.cuda(non_blocking=True)
-            target = target.cuda(non_blocking=True)
+            val_inputs, val_labels = batch['train']
+            batch_size = val_inputs.shape[0]
 
-            # compute output
-            if args.arch in ['sparsescatnet', 'sparsescatnetw']:
-                output, _, sparsity, support_size, support_diff, rec_loss_rel = model(input)
-            else:
-                output = model(input)
+            loss_sum = 0
+            for j in range(0, batch_size):
+                input = val_inputs[j, ::]
+                labels = val_labels[j, ::].cuda()
+                # compute output
+                if args.arch in ['sparsescatnet', 'sparsescatnetw']:
+                    output, lambda_0_max_batch, sparsity, support_size, support_diff, rec_loss_rel = model(input)
+                else:
+                    output = model(input)
 
-            loss = criterion(output, target)
+                #loss_temp = criterion(output, labels)
+                loss = criterion(output, labels)
+                loss_sum += loss.item()
 
+            test_inputs, test_labels = batch['test']
+                
             # measure accuracy and record loss
-            acc1, acc5 = accuracy(output, target, topk=(1, 5))
-            losses.update(loss.item(), input.size(0))
-            top1.update(acc1[0], input.size(0))
-            top5.update(acc5[0], input.size(0))
+            acc1, acc5 = accuracy(test_inputs, test_labels, model, args, topk=(1, 5))
+            losses.update(loss.item(), batch_size)
+            top1.update(acc1, batch_size)
+            top5.update(acc5, batch_size)
 
             # Record useful indicators for ISTC
             if args.arch in ['sparsescatnet', 'sparsescatnetw']:
@@ -931,21 +947,41 @@ def adjust_learning_rate(optimizer, epoch, args):
         param_group['lr'] = lr
 
 
-def accuracy(output, target, topk=(1,)):
+def accuracy(inputs, labels, model, args, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
-    with torch.no_grad():
-        maxk = max(topk)
-        batch_size = target.size(0)
+    batch_size = inputs.shape[0]
+    res = torch.zeros(batch_size, len(topk)).cuda()
+    
+    for i in range(0, batch_size):
+        test_input = inputs[i, ::].cuda()
+        test_labels = labels[i, ::].cuda()
+        # compute output
+        if args.arch in ['sparsescatnet', 'sparsescatnetw']:
+            output, lambda_0_max_batch, sparsity, support_size, support_diff, rec_loss_rel = model(test_input)
+        else:
+            output = model(test_input)
 
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
+    
+        with torch.no_grad():
+            maxk = max(topk)
+            batch_size = test_labels.size(0)
 
-        res = []
-        for k in topk:
-            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
-            res.append(correct_k.mul_(100.0 / batch_size))
-        return res
+            _, pred = output.topk(maxk, 1, True, True)
+            pred = pred.t()
+            correct = pred.eq(test_labels.view(1, -1).expand_as(pred))
+
+            #res = []
+            for j in range(0, len(topk)):
+            #for k in topk:
+                k = topk[j]
+                correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+                res[i, j] = (correct_k.mul_(100.0 / batch_size))
+    
+    res = torch.mean(res, 0)
+    
+    acc1 = res[0].item()
+    acc5 = res[1].item()
+    return acc1, acc5
 
 
 def compute_lambda_0(loader, model, nb_batches=1):
