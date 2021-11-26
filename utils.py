@@ -34,19 +34,24 @@ def compute_stding_matrix(data_loader, transformation, logfile, print_freq=100):
         print_and_write('Computing mean and standardization matrix...', logfile)
         print_and_write('Starting by computing mean and std dev...', logfile)
         mean_var_meter = AverageVarMeter()
-        for i, (input, _) in enumerate(data_loader):
-            input = input.cuda()
-            if transformation is not None:
-                input = transformation(input)
-            if len(input.size()) == 5:
-                B, nc1, nc2, H, W = input.size()
-                input = input.view(B, nc1 * nc2, H, W).contiguous()
+        for i, batch in enumerate(data_loader):
+            train_input, train_labels = batch['train']
+            #input = input.cuda()
+            batch_size = train_input.shape[0]
 
-            batch_mean, batch_var, samples_size = compute_batch_mean_var(input, var=True)
-            mean_var_meter.update(batch_mean, batch_var, samples_size)
+            for j in range(0, batch_size):
+                input = train_input[j, ::]
+                if transformation is not None:
+                    input = transformation(input)
+                if len(input.size()) == 5:
+                    B, nc1, nc2, H, W = input.size()
+                    input = input.view(B, nc1 * nc2, H, W).contiguous()
 
-            if i % print_freq == 0:
-                print_and_write('batch: [{0}/{1}]'.format(i, len(data_loader)), logfile)
+                batch_mean, batch_var, samples_size = compute_batch_mean_var(input, var=True)
+                mean_var_meter.update(batch_mean, batch_var, samples_size)
+
+                if i % print_freq == 0:
+                    print_and_write('batch: [{0}/{1}]'.format(i, len(data_loader)), logfile)
 
         mean = mean_var_meter.avg
         std = torch.sqrt(mean_var_meter.var)
